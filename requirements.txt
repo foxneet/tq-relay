@@ -1,0 +1,6 @@
+# TQRelay uses only the Python standard library (>= 3.8).
+# No third-party dependencies required at runtime.
+#
+# Optional, for building a single-file GUI exe:
+#   pip install pyinstaller
+#   pyinstaller --onefile --windowed --name TQRelay tq_relay.py

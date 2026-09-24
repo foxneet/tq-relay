@@ -1,0 +1,9 @@
+__pycache__/
+build/
+dist/
+*.spec
+*.exe
+TQ转发器_配置.json
+日志/
+*.log
+信号日志*.jsonl
