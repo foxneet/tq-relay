@@ -70,7 +70,7 @@ TQ层:   {"id":1, "result": {"ErrorId":"0", ...}}      // ErrorId != "0" 表示 
 
 ### GET /ping?token=...
 
-`{"ok": true, "service": "tq_relay", "version": "1.0.0", ...}`
+`{"ok": true, "service": "tq_relay", "version": "1.0.1", ...}`
 
 ### 透明端口（勾选开启后）
 
@@ -82,6 +82,18 @@ netsh interface portproxy add v4tov4 listenaddress=127.0.0.1 listenport=17709 co
 ```
 
 ## 客户端示例
+
+### 自带封装客户端（推荐）
+
+`skills/tq-relay/scripts/tq_client.py`——纯标准库，CLI 与 Python 类两种用法，已封装两层错误检查（转发层 + TQ 层），失败统一抛 `TQRelayError`：
+
+```bash
+py -3.14 skills/tq-relay/scripts/tq_client.py ping --host <机器A_IP> --token <token>
+py -3.14 skills/tq-relay/scripts/tq_client.py call --host <机器A_IP> --token <token> \
+    --method get_market_snapshot --params "{\"stock_code\":\"159582.SZ\"}"
+```
+
+接口速查见 [`skills/tq-relay/references/interfaces.md`](skills/tq-relay/references/interfaces.md)。
 
 ### Python（任意机器、任意 Python 3.x）
 
@@ -227,6 +239,23 @@ def main_on_tick(ContextInfo):
 双机环境（通达信机 + 国信 iQuant QMT 端）实测：16 项功能自测全部通过
 （鉴权/K线/快照/基础信息/名称检索/ETF列表/交易日历/扩展信息/股本/除权/涨跌停/公式真筹码/持仓查询/便捷接口/透明端口）。
 测试脚本见 [`tests/selftest_qmt.py`](tests/selftest_qmt.py)。
+
+## 仓库结构
+
+```
+├── README.md                    本文件(完整使用文档)
+├── AGENTS.md                    面向 AI agent 的使用与维护指南
+├── tq_relay.py                  服务端(纯标准库, GUI + --serve 双模式)
+├── tests/selftest_qmt.py        QMT端16项双机自测策略(GBK, 整段粘贴进QMT运行)
+├── skills/tq-relay/             ZCode skill: SKILL.md + scripts/tq_client.py 客户端
+│                                + references/interfaces.md 接口速查
+└── requirements.txt             无第三方依赖说明(仅打包需要 PyInstaller)
+```
+
+## 版本
+
+- **1.0.1**：修复 GUI 模式缺失 `import queue` 导致的启动崩溃（`--serve` 模式不受影响，故此前未被发现）。
+- **1.0.0**：首个发布版，双机 16 项自测通过。
 
 ## License
 
