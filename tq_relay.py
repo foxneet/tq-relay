@@ -33,6 +33,7 @@ K线/实时快照/公式引擎(含WINNER,COST等筹码函数, 由通达信原生
 import sys
 import os
 import json
+import queue
 import socket
 import secrets
 import threading
@@ -42,7 +43,7 @@ import urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import traceback
 
-VERSION = '1.0.0'
+VERSION = '1.0.1'
 
 if sys.stdout is None:
     sys.stdout = open(os.devnull, 'w', encoding='utf-8')
@@ -74,6 +75,27 @@ TRADE_METHODS = {'stock_account', 'query_stock_positions', 'order_stock',
                  'cancel_order_stock', 'query_stock_asset', 'query_stock_orders'}
 TEST_CODE = '518880.SH'              # 通达信连通性测试用代码
 
+# tq_url 仅允许指向本机回环地址: 网关暴露在 0.0.0.0, 若转发目标可被配置成任意
+# 主机, 就会被改造成对内网任意 HTTP 服务的跳板(SSRF)。确需转发到其他主机时,
+# 设环境变量 TQRELAY_ALLOW_REMOTE_TQ=1 显式豁免。
+LOOPBACK_HOSTS = {'127.0.0.1', 'localhost', '::1'}
+
+
+def validate_tq_url(url):
+    """校验 tq_url: 仅 http/https 且主机为回环地址。返回 None=通过, 否则返回错误说明。"""
+    try:
+        u = urllib.parse.urlsplit(url or '')
+    except ValueError:
+        return 'tq_url 无法解析: %r' % (url,)
+    if u.scheme not in ('http', 'https'):
+        return 'tq_url 仅支持 http/https: %r' % (url,)
+    if (u.hostname or '').lower() not in LOOPBACK_HOSTS \
+            and os.environ.get('TQRELAY_ALLOW_REMOTE_TQ') != '1':
+        return ('tq_url 仅允许本机回环地址(127.0.0.1/localhost/[::1]); '
+                '如确需转发到其他主机, 设环境变量 TQRELAY_ALLOW_REMOTE_TQ=1 后重启')
+    return None
+
+
 CONFIG = dict(DEFAULT_CONFIG)
 TQ_LOCK = threading.Lock()           # TQ串行化(不耐并发)
 
@@ -89,6 +111,9 @@ def load_config():
         CONFIG['token'] = os.environ.get('SIGNAL_TOKEN', '') or secrets.token_hex(8)
     for k in ('port', 'timeout_sec', 'max_body_mb', 'transparent_port'):
         CONFIG[k] = int(CONFIG.get(k) or DEFAULT_CONFIG.get(k, 0))
+    err = validate_tq_url(CONFIG.get('tq_url'))
+    if err:
+        raise SystemExit('TQRelay 配置错误: %s\n(tq_url=%r, 配置文件=%s)' % (err, CONFIG.get('tq_url'), CONFIG_PATH))
     try:
         with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
             json.dump(CONFIG, f, ensure_ascii=False, indent=2)
@@ -409,7 +434,12 @@ def run_gui():
         CONFIG['token'] = e_token.get().strip()
         CONFIG['tdx_path'] = e_tdx.get().strip()
         CONFIG['log_dir'] = e_log.get().strip()
-        CONFIG['tq_url'] = e_tq.get().strip() or CONFIG['tq_url']
+        _new_tq = e_tq.get().strip() or CONFIG['tq_url']
+        _err = validate_tq_url(_new_tq)
+        if _err:
+            log('配置未应用: %s' % _err)
+            return
+        CONFIG['tq_url'] = _new_tq
         CONFIG['allow_trade'] = bool(var_trade.get())
         CONFIG['transparent_enabled'] = bool(var_trans.get())
         try:
