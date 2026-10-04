@@ -26,7 +26,7 @@
 
 ## 快速开始
 
-0. **免安装运行**：从 [Releases](https://github.com/foxneet/tq-relay/releases/latest) 下载 `TQRelay_1.0.1.exe`（PyInstaller 单文件），双击运行即可，首次启动自动生成配置与随机 token；发行说明附 sha256 可核对文件完整性。
+0. **免安装运行**：从 [Releases](https://github.com/foxneet/tq-relay/releases/latest) 下载 `TQRelay_1.0.2.exe`（PyInstaller 单文件），双击运行即可，首次启动自动生成配置与随机 token；发行说明附 sha256 可核对文件完整性。
 1. 在**通达信所在机器**（机器A）运行 `python tq_relay.py`（GUI 自动开服务），或
    `python tq_relay.py --serve`（无界面后台）。首次运行自动生成配置文件 `TQ转发器_配置.json`（token 自动随机生成）。
 2. 放行防火墙：首次弹窗允许，或
@@ -71,7 +71,7 @@ TQ层:   {"id":1, "result": {"ErrorId":"0", ...}}      // ErrorId != "0" 表示 
 
 ### GET /ping?token=...
 
-`{"ok": true, "service": "tq_relay", "version": "1.0.1", ...}`
+`{"ok": true, "service": "tq_relay", "version": "1.0.2", ...}`
 
 ### 透明端口（勾选开启后）
 
