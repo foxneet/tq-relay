@@ -13,7 +13,6 @@ Python:
 """
 import argparse
 import json
-import sys
 import urllib.parse
 import urllib.request
 
@@ -25,30 +24,54 @@ class TQRelayError(Exception):
     """转发层错误（连接/超时/token）或 TQ 业务错误（ErrorId != '0'）"""
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """拒绝跟随重定向：防止被指向的网关把客户端请求转跳到其他内部服务"""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise TQRelayError('拒绝跟随重定向(%s %s): 网关不应重定向' % (code, newurl))
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
+def _check_url(url):
+    """仅允许 http/https 且不带用户信息的合法 URL"""
+    u = urllib.parse.urlsplit(url)
+    if u.scheme not in ('http', 'https') or not u.hostname or u.username or u.password:
+        raise TQRelayError('非法 relay URL: %r' % url)
+    return url
+
+
 class TQRelay:
     def __init__(self, host, token, port=DEFAULT_PORT, timeout=DEFAULT_TIMEOUT):
+        if not host or any(ch in host for ch in '/@:?# \t'):
+            raise TQRelayError('host 非法（只接受主机名或 IP）: %r' % host)
         self.base = 'http://%s:%d' % (host, port)
         self.token = token
         self.timeout = timeout
 
     def ping(self):
-        url = '%s/ping?token=%s' % (self.base, urllib.parse.quote(self.token))
+        url = _check_url('%s/ping?token=%s' % (self.base, urllib.parse.quote(self.token)))
         try:
-            with urllib.request.urlopen(url, timeout=10) as r:
+            with _OPENER.open(url, timeout=10) as r:
                 return json.loads(r.read().decode('utf-8', 'replace'))
+        except TQRelayError:
+            raise
         except Exception as e:
             raise TQRelayError('ping 失败（转发器没运行/端口/防火墙/token 错误?）: %s' % e)
 
     def call(self, method, params=None, timeout=None):
         """调用任意 TQ 接口。返回 TQ 原始 JSON；两层错误任一发生即抛 TQRelayError。"""
-        url = '%s/tq?token=%s' % (self.base, urllib.parse.quote(self.token))
+        url = _check_url('%s/tq?token=%s' % (self.base, urllib.parse.quote(self.token)))
         body = json.dumps({'method': method, 'params': params or {}},
                           ensure_ascii=False).encode('utf-8')
         req = urllib.request.Request(url, data=body,
             headers={'Content-Type': 'application/json; charset=utf-8'}, method='POST')
         try:
-            with urllib.request.urlopen(req, timeout=timeout or self.timeout) as r:
+            with _OPENER.open(req, timeout=timeout or self.timeout) as r:
                 resp = json.loads(r.read().decode('utf-8', 'replace'))
+        except TQRelayError:
+            raise
         except Exception as e:
             raise TQRelayError('转发层失败 [%s]: %s' % (method, e))
         if isinstance(resp, dict) and 'error' in resp:
@@ -72,12 +95,15 @@ def main():
     a = ap.parse_args()
 
     relay = TQRelay(a.host, token=a.token, port=a.port, timeout=a.timeout)
-    if a.action == 'ping':
-        out = relay.ping()
-    else:
-        if not a.method:
-            ap.error('call 需要 --method')
-        out = relay.call(a.method, json.loads(a.params), timeout=a.timeout)
+    try:
+        if a.action == 'ping':
+            out = relay.ping()
+        else:
+            if not a.method:
+                ap.error('call 需要 --method')
+            out = relay.call(a.method, json.loads(a.params), timeout=a.timeout)
+    except TQRelayError as e:
+        ap.exit(2, '错误: %s\n' % e)
     print(json.dumps(out, ensure_ascii=False, indent=2))
 
 

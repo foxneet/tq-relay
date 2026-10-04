@@ -30,7 +30,16 @@ URL_BASE = 'http://%s:%d' % (SIGNAL_HOST, PORT)
 RESULTS = []
 
 
+def _check_url(url):
+    # SSRF guard: only http(s), host required, no userinfo, no redirects target
+    u = urllib.parse.urlsplit(url)
+    if u.scheme not in ('http', 'https') or not u.hostname or u.username or u.password:
+        raise ValueError('bad relay url: %r' % url)
+    return url
+
+
 def _post(url, body, timeout=120):
+    url = _check_url(url)
     req = urllib.request.Request(url,
         data=json.dumps(body, ensure_ascii=False).encode('utf-8'),
         headers={'Content-Type': 'application/json; charset=utf-8'}, method='POST')
@@ -39,6 +48,7 @@ def _post(url, body, timeout=120):
 
 
 def _get(url, timeout=30):
+    url = _check_url(url)
     r = urllib.request.urlopen(url, timeout=timeout)
     return json.loads(r.read().decode('utf-8', 'replace'))
 

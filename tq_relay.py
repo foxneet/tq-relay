@@ -33,6 +33,7 @@ K线/实时快照/公式引擎(含WINNER,COST等筹码函数, 由通达信原生
 import sys
 import os
 import json
+import hmac
 import queue
 import socket
 import secrets
@@ -43,12 +44,20 @@ import urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import traceback
 
-VERSION = '1.0.1'
+VERSION = '1.0.2'
+
+class _NullIO:
+    """PyInstaller --windowed 模式下 stdout/stderr 为 None，用空实现兜底"""
+    encoding = 'utf-8'
+    def write(self, *_a):
+        return 0
+    def flush(self):
+        pass
 
 if sys.stdout is None:
-    sys.stdout = open(os.devnull, 'w', encoding='utf-8')
+    sys.stdout = _NullIO()
 if sys.stderr is None:
-    sys.stderr = open(os.devnull, 'w', encoding='utf-8')
+    sys.stderr = _NullIO()
 try:
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
@@ -100,8 +109,13 @@ CONFIG = dict(DEFAULT_CONFIG)
 TQ_LOCK = threading.Lock()           # TQ串行化(不耐并发)
 
 
+def config_writable(path):
+    """配置文件只允许落在 BASE_DIR 内（路径护栏：配置写死的文件名，防被改造指向别处）"""
+    p, base = os.path.abspath(path), os.path.abspath(BASE_DIR)
+    return p == base or p.startswith(base + os.sep)
+
+
 def load_config():
-    global CONFIG
     try:
         with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
             CONFIG.update(json.load(f))
@@ -114,6 +128,8 @@ def load_config():
     err = validate_tq_url(CONFIG.get('tq_url'))
     if err:
         raise SystemExit('TQRelay 配置错误: %s\n(tq_url=%r, 配置文件=%s)' % (err, CONFIG.get('tq_url'), CONFIG_PATH))
+    if not config_writable(CONFIG_PATH):
+        raise SystemExit('TQRelay 配置错误: 配置路径必须在程序目录内: %r' % CONFIG_PATH)
     try:
         with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
             json.dump(CONFIG, f, ensure_ascii=False, indent=2)
@@ -181,7 +197,8 @@ def make_handler(log):
             self.wfile.write(body)
 
         def _auth(self, q):
-            if q.get('token', [''])[0] != CONFIG.get('token'):
+            # 常数时间比较，避免逐字节短路泄露 token 前缀
+            if not hmac.compare_digest(str(q.get('token', [''])[0]), str(CONFIG.get('token'))):
                 self._send({'error': 'token错误'})
                 return False
             return True
@@ -332,6 +349,12 @@ def start_servers(log):
     th.start()
     tsrv, tth = None, None
     if CONFIG.get('transparent_enabled'):
+        if not (CONFIG.get('allow_ips') or '').strip():
+            warn = ('透明端口无 token 且 allow_ips 为空 = 对整个局域网开放。'
+                    '强烈建议在配置 allow_ips 填入客户端 IP 白名单后重启；'
+                    '不做交易请把 allow_trade 设为 false。')
+            log('[安全警告] %s' % warn)
+            dlog('透明端口开放配置: %s' % warn, error=True)
         tsrv = HTTPServer(('0.0.0.0', int(CONFIG['transparent_port'])),
                           make_transparent_handler(log))
         tth = threading.Thread(target=tsrv.serve_forever, daemon=True)
@@ -442,6 +465,9 @@ def run_gui():
         CONFIG['tq_url'] = _new_tq
         CONFIG['allow_trade'] = bool(var_trade.get())
         CONFIG['transparent_enabled'] = bool(var_trans.get())
+        if not config_writable(CONFIG_PATH):
+            log('配置保存失败: 配置路径必须在程序目录内')
+            return
         try:
             with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
                 json.dump(CONFIG, f, ensure_ascii=False, indent=2)
